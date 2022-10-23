@@ -41,7 +41,7 @@ def rearrange_data(ground_truth_labels, matrices_on_each_frame):
     matrices_train = temp_matrices[0]
     labels_train = temp_labels[0]
 
-    for i in range(1, 5):
+    for i in range(1, 4):
         matrices_train = np.concatenate(
             (matrices_train, matrices_on_each_frame[i]), axis=0
         )
@@ -97,7 +97,7 @@ def duplicate_data(matrices, ground_truth_sift_label):
 
         matrices_foreground = np.resize(
             matrices_foreground,
-            (len(ground_truth_sift_label) - 2 * foreground_length, 3, 3),
+            (len(ground_truth_sift_label) - 2 * foreground_length, 3, 5),
         )
         labels = np.ones(len(ground_truth_sift_label) - 2 * sum(ground_truth_sift_label))
         matrices = np.append(matrices, matrices_foreground, axis=0)
@@ -113,7 +113,7 @@ def duplicate_data(matrices, ground_truth_sift_label):
 
         matrices_backgound = np.resize(
             matrices_backgound,
-            (len(ground_truth_sift_label) - 2 * background_length, 3, 3),
+            (len(ground_truth_sift_label) - 2 * background_length, 3, 5),
         )
         labels = np.zeros(len(ground_truth_sift_label) - 2 * background_length)
         matrices = np.append(matrices, matrices_backgound, axis=0)
@@ -208,14 +208,14 @@ def load_data(input_path):
 
 
 def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
-    mode = "F"
-    # mode = "H"
+    # mode = "F"
+    mode = "H"
     if mode == "F":
         if len(current_partial_kp) > 6:
             current_partial_kp = np.float32(current_partial_kp).reshape(-1, 1, 2)
             next_partial_kp = np.float32(next_partial_kp).reshape(-1, 1, 2)
 
-            F, _ = cv2.findFundamentalMat(current_partial_kp, next_partial_kp, cv2.RANSAC, 5.0, confidence=0.95)
+            F, _ = cv2.findFundamentalMat(current_partial_kp, next_partial_kp, cv2.RANSAC, 5.0, confidence=0.9)
 
             if F is None:
                 return np.zeros(1)
@@ -247,28 +247,33 @@ def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
 
             if H is None:
                 return np.zeros(1)
+            current_cord = np.c_[current_partial_kp[0], frame_num].reshape(3, -1)
+            next_cord = np.c_[next_partial_kp[0], frame_num + 1].reshape(3, -1)
+            H = np.c_[H, current_cord, next_cord]
+            # print(current_cord.shape,next_cord.shape,H.shape)
+
             #################################################### Refine the H Matrix
-            for i in range(current_partial_kp.shape[0]):
-                current_kp_cord = current_partial_kp[i]
-                next_kp_cord = next_partial_kp[i]
-                current_kp_cord = np.c_[current_kp_cord, 1]
-                next_kp_cord = np.c_[next_kp_cord, 1]
+            # for i in range(current_partial_kp.shape[0]):
+            #     current_kp_cord = current_partial_kp[i]
+            #     next_kp_cord = next_partial_kp[i]
+            #     current_kp_cord = np.c_[current_kp_cord, 1]
+            #     next_kp_cord = np.c_[next_kp_cord, 1]
+            #
+            #     transfer_cord = (H @ current_kp_cord.T).T
+            #     if transfer_cord[:, 2] == 0:
+            #         return np.zeros(1)
+            #
+            #     transfer_cord = transfer_cord / transfer_cord[:, 2]
 
-                transfer_cord = (H @ current_kp_cord.T).T
-                if transfer_cord[:, 2] == 0:
-                    return np.zeros(1)
-
-                transfer_cord = transfer_cord / transfer_cord[:, 2]
-
-                # if np.linalg.norm(transfer_cord - next_kp_cord) <= 1:
-                #     continue
-                # else:
-                #     print("not a valid F matrix")
-                #     return np.zeros(1)
-                # print(transfer_cord.shape)
-                if transfer_cord[:, 0] < 0 or transfer_cord[:, 0] > 1920 or transfer_cord[:, 1] < 0 or transfer_cord[:,
-                                                                                                       1] > 1080:
-                    return np.zeros(1)
+            # if np.linalg.norm(transfer_cord - next_kp_cord) <= 1:
+            #     continue
+            # else:
+            #     print("not a valid F matrix")
+            #     return np.zeros(1)
+            # print(transfer_cord.shape)
+            # if transfer_cord[:, 0] < 0 or transfer_cord[:, 0] > 1920 or transfer_cord[:, 1] < 0 or transfer_cord[:,
+            #                                                                                        1] > 1080:
+            #     return np.zeros(1)
 
             return H
 
@@ -345,7 +350,7 @@ def calculate_motion_matrices(current_compare, frame_num):
                 # print(trans_matrix)
                 if count == 19:
                     # print("over threshold", count)
-                    trans_matrix = np.full((3, 3), np.inf)
+                    trans_matrix = np.full((3, 5), np.inf)
                 else:
                     num_of_neighbour += 1
                     trans_matrix = find_nearest_keypoints(
@@ -397,7 +402,7 @@ def Retrieve_all_transformation_matrix(match_kps_list):
         print("before tuning, we have {} key points".format(current_kps.shape))
         if matrices_on_each_frame[index].__contains__(np.inf):
             matrices_on_each_frame[index] = matrices_on_each_frame[index][
-                np.where(matrices_on_each_frame[index] != np.inf)].reshape(-1, 3, 3)
+                np.where(matrices_on_each_frame[index] != np.inf)].reshape(-1, 3, 5)
             current_kps = current_kps[np.where(matrices_on_each_frame[index] != np.inf)[0]]
             current_kps = current_kps[np.unique(np.where(matrices_on_each_frame[index] != np.inf)[0])]
 
@@ -449,40 +454,67 @@ def extract_feature(input_txt_path, output_path):
                                 keypoints0=keypoints0, keypoints1=keypoints1)
 
 
-def NN_predict(matrices, labels, model):
-    count = 0
-    correct = 0
+def NN_predict(matrices, model):
+    model.eval()
+    predicted_labels = []
     for index in range(len(matrices)):
         matrix = matrices[index]
-        targets = labels[index]
         matrix = matrix.reshape(1, 3, -1)
         matrix = torch.tensor(matrix, dtype=torch.float32)
         matrix = matrix.unsqueeze(0).to(device)
-        outputs = model(matrix)
+        with torch.no_grad():
+            outputs = model(matrix)
         thresh = torch.tensor([0.5]).to(device)
         predicted = (outputs > thresh).float() * 1
-
-        correct += predicted.eq(targets).sum().item()
-        count += 1
-
-    return count, correct
+        predicted_labels.append(predicted.item())
+    return predicted_labels
 
 
-def NN_clustering(ground_truth_labels, matrices_on_each_frame, model, ):
-    # summary(MatClassificationNet().to(device), input_size=(1, 3, 6))
-    model.eval()
-    total_correct = 0
-    total = 0
+def NN_clustering(matrices_on_each_frame, feature_sequence, rgb_images, model):
+    # summary(MatClassificationNet().to(device), input_size=(1, 3, 5))
     for i in range(len(matrices_on_each_frame)):
         matrices = matrices_on_each_frame[i]
-        labels = ground_truth_labels[i]
-        count, correct = NN_predict(matrices, labels, model)
-        total += count
-        total_correct += correct
-        print("in frame {}, total matrices {}, total correct {} ".format(i, count, correct))
+        labels = NN_predict(matrices, model)
+        image = rgb_images[i]
+        current_kp = feature_sequence[i]
+        Show_predictions(current_kp, labels, i, image, video)
 
-    acc = (total_correct / total) * 100
-    print("for testing : ", acc)
+
+def Show_predictions(current_kp, labels, frame_num, image, video):
+    output_path = os.path.join(ROOT, "Runs", video, "Outputs")
+    background_path = os.path.join(output_path, "Background")
+    foreground_path = os.path.join(output_path, "Foreground")
+    mask_path = os.path.join(output_path, "Mask")
+    tracking_path = os.path.join(output_path, "Track")
+    cut_path = os.path.join(output_path, "Cut")
+    if not os.path.isdir(background_path):
+        os.makedirs(background_path)
+    if not os.path.isdir(foreground_path):
+        os.makedirs(foreground_path)
+    if not os.path.isdir(mask_path):
+        os.makedirs(mask_path)
+    if not os.path.isdir(tracking_path):
+        os.makedirs(tracking_path)
+    if not os.path.isdir(cut_path):
+        os.makedirs(cut_path)
+
+    foreground_points = []
+    background_points = []
+    kp_coords = []
+    for i in range(len(labels)):
+        if labels[i] == 0:
+            background_points.append(current_kp[i])
+        else:
+            foreground_points.append(current_kp[i])
+            kp_coords.append(current_kp[i])
+
+    background_img = image.copy()
+    for bg_points in background_points:
+        cv2.circle(background_img, (int(bg_points[0]), int(bg_points[1])), radius=1, color=(0, 0, 255))
+    cv2.imwrite(os.path.join(background_path, "Background{:03d}.jpg".format(frame_num)), background_img)
+    for fg_points in foreground_points:
+        cv2.circle(image, (int(fg_points[0]), int(fg_points[1])), radius=1, color=(255, 0, 0))
+    cv2.imwrite(os.path.join(foreground_path, "Foreground{:03d}.jpg".format(frame_num)), image)
 
 
 if __name__ == "__main__":
@@ -495,7 +527,7 @@ if __name__ == "__main__":
             all_images = os.path.join(image_path, video)
             all_gt = os.path.join(label_path, video)
             gt_images = read_images(all_gt)
-
+            rgb_images = read_images(all_images, "color")
         # first time generating data:
         # f = open(os.path.join(output_path, "image_pairs.txt"), "w")
         # generate_compare_txt(all_images, f, sorted(os.listdir(all_images)))
@@ -505,13 +537,20 @@ if __name__ == "__main__":
         matches_path = os.path.join(output_path, "KP_Matches")
         # extract_feature(txt_path, output_path=matches_path)
         match_kps_list = sorted([os.path.join(matches_path, file) for file in os.listdir(matches_path)])
-        Retrieve_all_transformation_matrix(match_kps_list)
+        # Retrieve_all_transformation_matrix(match_kps_list)
 
+        ## train model:
         # when we have generated data:
-        # print("output path at last: ", output_path)
         feature_sequence, matrices_on_each_frame = load_data(output_path)
-        # print(feature_sequence)
-        print("feature_sequence shape is ", len(feature_sequence[0]))
         ground_truth_labels = Extract_labels(feature_sequence, gt_images)
-        model = get_model(matrices_on_each_frame, ground_truth_labels, video)
-        NN_clustering(ground_truth_labels, matrices_on_each_frame, model)
+
+        model_path = os.path.join(ROOT, "Runs", video, "ckpt.pth")
+        if os.path.exists(model_path):
+            chkpt = torch.load(model_path, map_location=device)
+            model = MatClassificationNet().to(device)
+            model.load_state_dict(chkpt)
+        else:
+            model = get_model(matrices_on_each_frame, ground_truth_labels, video)
+
+        ## Validate model
+        NN_clustering(matrices_on_each_frame, feature_sequence, rgb_images, model)

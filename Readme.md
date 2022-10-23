@@ -41,8 +41,8 @@ ${ROOT}
 
 ### Prerequisites
 You need to install the following software/libraries:
-* Notice: We use yolo-v7 model to do a rough preprocessing to find some Bounding box to significantly reduce complexity in Pixel-wise. So please following yolo documents to create the environment -- https://github.com/WongKinYiu/yolov7.   
-* Otherwise: you are free to use any version of python if you want to use SIFT/ORB only
+* Notice: We use VGG model to find rough key points and their matching, which significantly reduces complexity in Pixel-wise. So please following yolo documents to create the environment -- "https://github.com/ufukefe/DFM".   
+* Otherwise: you are free to use any version of python if you want to use traditional SIFT/Surf/ORB only
 ```shell 
 pip install -r requirements.txt
 ```
@@ -80,7 +80,6 @@ This project has proven that our proposed method not only work on Static Cameras
 
 
 ## New Idea：
-
 如果学习的是仿射变换，
 H矩阵可以由GT+Rasanc提取出来
 输入是一个第一幅图坐标+一个H矩阵
