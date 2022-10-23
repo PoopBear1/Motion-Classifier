@@ -41,8 +41,8 @@ ${ROOT}
 
 ### Prerequisites
 You need to install the following software/libraries:
-* Notice: We use VGG model to find rough key points and their matching, which significantly reduces complexity in Pixel-wise. So please following yolo documents to create the environment -- "https://github.com/ufukefe/DFM".   
-* Otherwise: you are free to use any version of python if you want to use traditional SIFT/Surf/ORB only
+* Notice: We use VGG model to find rough key points and their matching, which significantly reduces complexity in finding matches. So please following DFM documents to create the environment -- "https://github.com/ufukefe/DFM".   
+* Otherwise: you are free to use any version of python if you want to use traditional SIFT/SURf/ORB only
 ```shell 
 pip install -r requirements.txt
 ```
@@ -52,7 +52,7 @@ pip install -r requirements.txt
 
   
 #### Brief Description
-This Project is designed to do separation of background and foreground via transformation matrices clustering. Specifically, transformation matrices are calculated from multi-frames SIFT features points. By analyzing and clustering on matrices, we can easily determine which part do feature points belong to. The SLIC algorithm is applied to draw a foreground that has at least one SIFT point.
+This Project is designed to do separation of background and foreground via transformation matrices clustering. Specifically, transformation matrices are calculated from multi-frames SIFT features points. By analyzing and clustering on matrices, we can easily determine which part do feature points belong to. The SLIC algorithm is applied to draw a foreground that has at least one feature point.
 
 This project has proven that our proposed method not only work on Static Cameras but also actually perform well in Moving Cameras.
     
@@ -77,12 +77,18 @@ This project has proven that our proposed method not only work on Static Cameras
 
 
 
-
-
 ## New Idea：
-如果学习的是仿射变换，
-H矩阵可以由GT+Rasanc提取出来
-输入是一个第一幅图坐标+一个H矩阵
-输出是一个第二幅图的估计坐标，
-损失函数是用这个坐标判断是否在第二张图的ground-truth的范围里面
-用简单的Left Min - Right MAX
+* Joint Learning:
+  * Idea 1 
+    * 如果学习的是仿射变换矩阵H，
+    那么会有一个GT的前景矩阵H可以由GT图提取出来(二值掩图提取)。
+    输入是一个前一帧的某坐标(x)以及我们得到的一个GT——H矩阵，通过 公式 x' = H @ x 我们能够得到对应下一帧的坐标(x')
+    既然输出是一个第二幅图的估计坐标，损失函数可以用这个预测坐标判断是否在第二张图的ground-truth的范围里面(通过GT images会有一个bbox)
+    用简单的Left Min - Right MAX
+  * Idea 2
+    * 在多尺度下进行联合训练，用scale down的图片同样的方式作匹配得到一系列的运动矩阵，用这系列的矩阵和我们的原尺度图片的系列运动矩阵联合训练
+    * 如果因为像素点的减少我们不好找到对应的点所对应的运动矩阵，那么FLIP即是我们的alternative method.
+* NMS
+  * Idea 1
+  * 现在单单是通过前景点的分布密度来判断是否有异常值(假设点会在前景物体上分布更加密集那么一些离散的点应该被排除)。
+  * 然而有没有可能性我们使用NMX的方法来更准确的得到这些前景点并且排除一些干扰项？
