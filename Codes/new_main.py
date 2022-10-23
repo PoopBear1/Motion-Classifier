@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 from PIL import Image
 from scipy.spatial import distance
+from sklearn.neighbors import LocalOutlierFactor
+
 from model import *
 import copy
 
@@ -215,7 +217,7 @@ def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
             current_partial_kp = np.float32(current_partial_kp).reshape(-1, 1, 2)
             next_partial_kp = np.float32(next_partial_kp).reshape(-1, 1, 2)
 
-            F, _ = cv2.findFundamentalMat(current_partial_kp, next_partial_kp, cv2.RANSAC, 5.0, confidence=0.9)
+            F, _ = cv2.findFundamentalMat(current_partial_kp, next_partial_kp, cv2.RANSAC, 5.0, confidence=0.95)
 
             if F is None:
                 return np.zeros(1)
@@ -325,10 +327,8 @@ def find_nearest_keypoints(feature_distance,
 def calculate_motion_matrices(current_compare, frame_num):
     current_kp = current_compare["keypoints0"]
     next_kp = current_compare["keypoints1"]
-    # matches = current_compare["matches"]
 
     matrices_on_each_frame = []
-    found_matrix = 0
     for i in range(current_kp.shape[0]):
         keypoint = current_kp[i].reshape(-1, 2)
         # each kp compare all kps distance
@@ -342,14 +342,9 @@ def calculate_motion_matrices(current_compare, frame_num):
             next_kp,
             frame_num
         )
-        for count in range(20):
-            if (trans_matrix == np.inf).all():
-                # print("None: ", trans_matrix, "\n")
-                break
-            elif (trans_matrix == 0).all():
-                # print(trans_matrix)
-                if count == 19:
-                    # print("over threshold", count)
+        for count in range(22):
+            if (trans_matrix == 0).all():
+                if count == 21:
                     trans_matrix = np.full((3, 5), np.inf)
                 else:
                     num_of_neighbour += 1
@@ -361,21 +356,9 @@ def calculate_motion_matrices(current_compare, frame_num):
                         frame_num
                     )
             else:
-                found_matrix += 1
                 break
-                # # Current_coord = trans_matrix[:, -2]
-                # Next_coord = trans_matrix[:, -1]
-                # #  print("Current in frame: ", Current_coord)
-                # #  print("Predict in next frame: ", Next_coord)
-                # if Next_coord[1] > next_img.shape[0] or Next_coord[0] > next_img.shape[1] or Next_coord[1] < 0 or \
-                #         Next_coord[0] < 0:
-                #     trans_matrix = np.full((3, 5), np.inf)
-                # else:
-                #     # Current_RGB = img[int(Current_coord[1]), int(Current_coord[0]), :].reshape(3, -1)
-                #     # Next_RGB = next_img[int(Next_coord[1]), int(Next_coord[0]), :].reshape(3, -1)
-                #     # trans_matrix = np.c_[trans_matrix, Current_RGB, Next_RGB]
-                #     break
-        # print(trans_matrix)
+        if trans_matrix.__contains__(np.inf):
+            trans_matrix = np.full((3, 5), np.inf)
         matrices_on_each_frame.append(trans_matrix)
     matrices_on_each_frame = np.asarray(matrices_on_each_frame)
 
@@ -395,29 +378,34 @@ def Retrieve_all_transformation_matrix(match_kps_list):
     index = 0
     matrices_on_each_frame = {}
     while index < len(match_kps_list):
-        current_compare = np.load(match_kps_list[index])
-        matrices_on_each_frame[index] = calculate_motion_matrices(current_compare, index)
 
-        current_kps = current_compare["keypoints0"]
-        print("before tuning, we have {} key points".format(current_kps.shape))
-        if matrices_on_each_frame[index].__contains__(np.inf):
-            matrices_on_each_frame[index] = matrices_on_each_frame[index][
-                np.where(matrices_on_each_frame[index] != np.inf)].reshape(-1, 3, 5)
-            current_kps = current_kps[np.where(matrices_on_each_frame[index] != np.inf)[0]]
-            current_kps = current_kps[np.unique(np.where(matrices_on_each_frame[index] != np.inf)[0])]
+        if os.path.exists(os.path.join(refine_kps_path, "matched_kp_on_frame{:03d}.npy".format(index))):
+            print("generated before")
+            index += 1
+        else:
+            current_compare = np.load(match_kps_list[index])
+            matrices_on_each_frame[index] = calculate_motion_matrices(current_compare, index)
+            current_kps = current_compare["keypoints0"]
+            print("before tuning, we have {} key points".format(current_kps.shape))
+            if matrices_on_each_frame[index].__contains__(np.inf):
+                current_frame_matrices = matrices_on_each_frame[index]
+                good_indices = np.where(current_frame_matrices != np.inf)
+                matrices_on_each_frame[index] = current_frame_matrices[good_indices].reshape(-1, 3, 5)
+                current_kps = current_kps[np.unique(good_indices[0])]
 
-        print("After cut cropped key points, we have {} key points".format(current_kps.shape))
-        np.save(os.path.join(refine_kps_path, "matched_kp_on_frame{:03d}".format(index)), current_kps)
-        print("Saving computed matrix")
-        save_data(
-            matrices_on_each_frame[index],
-            os.path.join(
-                output_path,
-                "{}_Matrices_npy".format(matrix_type),
-                "{}_on_frame{:03d}.npy".format(matrix_type, index),
-            ), "npy"
-        )
-        index += 1
+
+            print("After cut cropped key points, we have {} key points".format(current_kps.shape))
+            np.save(os.path.join(refine_kps_path, "matched_kp_on_frame{:03d}".format(index)), current_kps)
+            print("Saving computed matrix")
+            save_data(
+                matrices_on_each_frame[index],
+                os.path.join(
+                    output_path,
+                    "{}_Matrices_npy".format(matrix_type),
+                    "{}_on_frame{:03d}.npy".format(matrix_type, index),
+                ), "npy"
+            )
+            index += 1
 
 
 def extract_feature(input_txt_path, output_path):
@@ -452,6 +440,27 @@ def extract_feature(input_txt_path, output_path):
 
             np.savez_compressed(output_path + '/' + p1 + '_' + p2 + '_' + 'matches',
                                 keypoints0=keypoints0, keypoints1=keypoints1)
+
+
+def filter_outliers(fg_kp, kp_coords):
+    if len(kp_coords) < 2:
+        return None
+    clf = LocalOutlierFactor(metric="euclidean")
+    labels = clf.fit_predict(kp_coords)
+    i = 0
+    new_fg = []
+    new_kp_coords = []
+    while i < len(labels):
+        if labels[i] != -1:
+            new_fg.append(fg_kp[i])
+            new_kp_coords.append(kp_coords[i])
+        i += 1
+
+    new_kp_coords = np.array(new_kp_coords)
+    min_coords = np.rint(np.amin(new_kp_coords, axis=0)).astype(int)
+    max_coords = np.rint(np.amax(new_kp_coords, axis=0)).astype(int)
+
+    return new_fg, min_coords, max_coords
 
 
 def NN_predict(matrices, model):
@@ -508,6 +517,10 @@ def Show_predictions(current_kp, labels, frame_num, image, video):
             foreground_points.append(current_kp[i])
             kp_coords.append(current_kp[i])
 
+    print("Before filtering: ", len(foreground_points))
+    foreground_points, min_coords, max_coords = filter_outliers(foreground_points, kp_coords)
+    print("Aftering filtering: ", len(foreground_points))
+
     background_img = image.copy()
     for bg_points in background_points:
         cv2.circle(background_img, (int(bg_points[0]), int(bg_points[1])), radius=1, color=(0, 0, 255))
@@ -529,15 +542,14 @@ if __name__ == "__main__":
             gt_images = read_images(all_gt)
             rgb_images = read_images(all_images, "color")
         # first time generating data:
-        # f = open(os.path.join(output_path, "image_pairs.txt"), "w")
-        # generate_compare_txt(all_images, f, sorted(os.listdir(all_images)))
-        # f.close()
-        # txt_path = os.path.join(output_path, "image_pairs.txt")
-        #
+        f = open(os.path.join(output_path, "image_pairs.txt"), "w")
+        generate_compare_txt(all_images, f, sorted(os.listdir(all_images)))
+        f.close()
+        txt_path = os.path.join(output_path, "image_pairs.txt")
         matches_path = os.path.join(output_path, "KP_Matches")
-        # extract_feature(txt_path, output_path=matches_path)
+        extract_feature(txt_path, output_path=matches_path)
         match_kps_list = sorted([os.path.join(matches_path, file) for file in os.listdir(matches_path)])
-        # Retrieve_all_transformation_matrix(match_kps_list)
+        Retrieve_all_transformation_matrix(match_kps_list)
 
         ## train model:
         # when we have generated data:
@@ -545,12 +557,12 @@ if __name__ == "__main__":
         ground_truth_labels = Extract_labels(feature_sequence, gt_images)
 
         model_path = os.path.join(ROOT, "Runs", video, "ckpt.pth")
-        if os.path.exists(model_path):
-            chkpt = torch.load(model_path, map_location=device)
-            model = MatClassificationNet().to(device)
-            model.load_state_dict(chkpt)
-        else:
-            model = get_model(matrices_on_each_frame, ground_truth_labels, video)
+        # if os.path.exists(model_path):
+        #     chkpt = torch.load(model_path, map_location=device)
+        #     model = MatClassificationNet().to(device)
+        #     model.load_state_dict(chkpt)
+        # else:
+        model = get_model(matrices_on_each_frame, ground_truth_labels, video)
 
         ## Validate model
         NN_clustering(matrices_on_each_frame, feature_sequence, rgb_images, model)
