@@ -11,37 +11,51 @@ from torchsummary import summary
 num_classes = 1
 
 # Hyper parameters
-config = {"lr": 1e-3,
-          "num_epochs": 80,
-          "batch_size": 64,
-          "regular_constant": 1e-5,
+config = {"lr": 1e-4,
+          "num_epochs": 120,
+          "batch_size": 128,
+          "regular_constant": 2e-5,
           # "transforms_train": transforms.Compose(transforms.Normalize([0.5], [0.5]))
           }
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("model is training on {}".format(device))
 
-
-class SetData(torch.utils.data.Dataset):
-    def __init__(self, data_root, data_label, transform=None, target_transform=None):
+class MotionMatricesDataset(torch.utils.data.Dataset):
+    def __init__(self, data_root, data_label, scaled_matrices=None, scaled_labels=None, transform=None,
+                 target_transform=None):
         self.data = data_root
         self.label = data_label
+        self.scaled_matrices = scaled_matrices
+        self.scaled_labels = scaled_labels
         self.transform = transform
         self.target_transform = target_transform
 
     def __getitem__(self, index):
-        data = torch.from_numpy(self.data)[index]
-        labels = torch.from_numpy(self.label)[index]
-        return torch.unsqueeze(data.float(), 0), labels
+        if self.scaled_matrices is not None:
+            origin_data = torch.from_numpy(self.data)[index]
+            origin_label = torch.from_numpy(self.label)[index]
+            scaled_data = torch.from_numpy(self.scaled_matrices)[index]
+            scaled_label = torch.from_numpy(self.scaled_labels)[index]
+            return torch.unsqueeze(origin_data.float(), 0), origin_label, torch.unsqueeze(scaled_data.float(),
+                                                                                          0), scaled_label
+        else:
+            data = torch.from_numpy(self.data)[index]
+            labels = torch.from_numpy(self.label)[index]
+            return torch.unsqueeze(data.float(), 0), labels, torch.ones(1), torch.ones(1)
 
     def __len__(self):
         return len(self.data)
 
 
-def To_dataset(matrices, labels):
+def To_dataset(matrices, labels, scaled_matrices=None, scaled_labels=None):
     source_data = matrices
     source_label = labels
-    dataset = SetData(source_data, source_label)
+    if scaled_matrices is not None:
+        dataset = MotionMatricesDataset(source_data, source_label, scaled_matrices, scaled_labels)
+    else:
+        dataset = MotionMatricesDataset(source_data, source_label)
     return dataset
 
 
@@ -94,20 +108,23 @@ class Block(nn.Module):
 
 
 class MatClassificationNet(nn.Module):
-    def __init__(self, num_classes=1, flag_cbam=False):
+    def __init__(self, num_classes=1, flag_cbam=True):
         super(MatClassificationNet, self).__init__()
         # output after initial layer: N * 3 * 3 * 3 -> N * 64 * 3 * 3
+        # input size: N*3*5
         self.flag_cbam = flag_cbam
         if flag_cbam:
+            # output after initial layer: N * 1 * 3 * 3 -> N * 64 * 3 * 3
+            # input size: N*3*5
             self.layer1 = nn.Sequential(
-                nn.Conv2d(1, 64, kernel_size=3, padding=1, stride=1),
+                nn.utils.weight_norm(nn.Conv2d(1, 64, kernel_size=3, padding=(2, 1), stride=2)),
                 nn.BatchNorm2d(64),
                 nn.LeakyReLU(0.2)
             )
-
+        # (3-3+2*2)/1+1 = 5 （5-3+2)/1+1 = 5 -> layer1:  5 * 5
         else:
             self.layer1 = nn.Sequential(
-                nn.Conv2d(1, 64, kernel_size=(3, 3)),
+                nn.utils.weight_norm(nn.Conv2d(1, 64, kernel_size=(3, 5))),
                 nn.BatchNorm2d(64),
                 nn.LeakyReLU()
             )
@@ -130,31 +147,10 @@ class MatClassificationNet(nn.Module):
             use_dropout=True
         )
 
-        self.cbam2 = CBAM(gate_channels=16)
-
-        # output after up3: N * 16 * 12 * 12 -> N * 8 * 24 * 24.
-        self.up3 = Block(
-            in_channels=16,
-            out_channels=8,
-            down=False,
-            act='relu',
-            use_dropout=False
-        )
-
-        self.cbam3 = CBAM(gate_channels=8)
-
-        # output after up4: N * 8 * 24 * 24 -> N * 3 * 48 * 48.
-        self.up4 = Block(
-            in_channels=8,
-            out_channels=3,
-            down=False,
-            act='relu',
-            use_dropout=False
-        )
 
         if self.flag_cbam:
             self.fc1 = nn.Sequential(
-                nn.Linear(6912, 1024),
+                nn.utils.weight_norm(nn.Linear(2304, 1024)),
                 nn.BatchNorm1d(1024),
                 nn.LeakyReLU(0.2)
             )
@@ -200,25 +196,15 @@ class MatClassificationNet(nn.Module):
                 nn.Sigmoid()
             )
 
-
     def forward(self, x):
-
         out = self.layer1(x)
         # print("out after layer1 is: ", out.size())
-
         if self.flag_cbam:
             out = self.up1(out)
             # print("out after up1 is: ", out.size())
             out = self.cbam1(out)
             # print("out after cbam1 is: ", out.size())
             out = self.up2(out)
-            # print("out after up2 is: ", out.size())
-            out = self.cbam2(out)
-            # print("out after cbam2 is: ", out.size())
-            out = self.up3(out)
-            # print("out after up3 is: ", out.size())
-            out = self.up4(out)
-
 
         # print("out after up4 is: ", out.size())
         out = torch.flatten(out, 1)
@@ -229,9 +215,10 @@ class MatClassificationNet(nn.Module):
         if not self.flag_cbam:
             out = self.fc3(out)
 
+        weights = out
         out = self.fc4(out)
 
-        return out
+        return out, weights
 
 
 def train(train_dataloader, validation_dataloader, validation_size, video="", model=None, ROOT=os.getcwd()):
@@ -239,6 +226,8 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
         model = MatClassificationNet(num_classes).to(device)
     # loss_function = nn.CrossEntropyLoss()
     loss_function = nn.BCELoss()
+    # loss_function = nn.BCEWithLogitsLoss()
+    latent_loss = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"], weight_decay=config['regular_constant'])
     train_loss_value = []
     validate_loss_value = []
@@ -259,17 +248,32 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
         train_loss = 0
         train_correct = 0
         train_total = 0
+        total_batch = 0
         model.train()
-        for batch_idx, (inputs, targets) in enumerate(train_dataloader):
+        for batch_idx, (inputs, targets, scaled_inputs, scaled_targets) in enumerate(train_dataloader):
             inputs, targets = inputs.to(device), targets.to(device)
-            optimizer.zero_grad()
-            outputs = model(inputs)
+            if scaled_inputs.all() != 1:
+                scaled_inputs, scaled_targets = scaled_inputs.to(device), scaled_targets.to(device)
+                optimizer.zero_grad()
+                outputs, weight1 = model(inputs)
+                scaled_outputs, weight2 = model(scaled_inputs)
+                outputs = outputs.squeeze().type(torch.float64)
+                scaled_outputs = scaled_outputs.squeeze().type(torch.float64)
 
-            outputs = outputs.squeeze().type(torch.float64)
-            # print(outputs)
-            # exit(-1)
-            loss = loss_function(outputs, targets)
+                loss1 = loss_function(outputs, targets)
+                loss2 = loss_function(scaled_outputs, scaled_targets)
+                loss3 = latent_loss(weight1, weight2)
+
+                loss = loss1 + loss2 + loss3
+            else:
+                optimizer.zero_grad()
+                outputs, weight1 = model(inputs)
+                outputs = outputs.squeeze().type(torch.float64)
+                loss1 = loss_function(outputs, targets)
+                loss = loss1
+
             loss.backward()
+
             optimizer.step()
 
             if (batch_idx + 1) % 100 == 0:
@@ -287,13 +291,14 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
             # print("outputs dimension:", outputs.size())
             # print("output:", outputs)
             # _, predicted = outputs.max(1)
-            thresh = torch.tensor([0.5]).to(device)
+            thresh = torch.tensor([0.5]).to(device).type(torch.float64)
             predicted = (outputs > thresh).float() * 1
             # print("predicted:", predicted)
             train_correct += predicted.eq(targets).sum().item()
+            total_batch = batch_idx
 
         train_acc = 100.0 * (train_correct / train_total)
-        train_loss /= train_total
+        train_loss /= total_batch
         train_loss_value.append(train_loss)
         train_accuracy.append(train_acc)
 
@@ -302,17 +307,37 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
         model.eval()
         validate_loss = 0
         correct = 0
+        total_batch = 0
         with torch.no_grad():
-            for inputs, targets in validation_dataloader:
+            for batch_idx, (inputs, targets, scaled_inputs, scaled_targets) in enumerate(validation_dataloader):
                 inputs, targets = inputs.to(device), targets.to(device)
-                targets = targets
-                outputs = model(inputs).squeeze().type(torch.float64)
+                if scaled_inputs.all() != 1:
+                    scaled_inputs, scaled_targets = scaled_inputs.to(device), scaled_targets.to(device)
+                    optimizer.zero_grad()
+                    outputs, weight1 = model(inputs)
+                    scaled_outputs, weight2 = model(scaled_inputs)
+                    outputs = outputs.squeeze().type(torch.float64)
+                    scaled_outputs = scaled_outputs.squeeze().type(torch.float64)
+
+                    loss1 = loss_function(outputs, targets)
+                    loss2 = loss_function(scaled_outputs, scaled_targets)
+                    loss3 = latent_loss(weight1, weight2)
+
+                    loss = loss1 + loss2 + loss3
+                else:
+                    optimizer.zero_grad()
+                    outputs, weight1 = model(inputs)
+                    outputs = outputs.squeeze().type(torch.float64)
+                    loss1 = loss_function(outputs, targets)
+                    loss = loss1
+
                 thresh = torch.tensor([0.5]).to(device)
                 predicted = (outputs > thresh).float() * 1
                 correct += predicted.eq(targets).sum()
-                validate_loss += loss_function(outputs, targets).item()
+                validate_loss += loss.item()
+                total_batch = batch_idx
 
-        validate_loss /= len(validation_dataloader.dataset)
+        validate_loss /= total_batch
         print("current lr:", scheduler.get_last_lr())
         print(
             "\nValidation set:  Accuracy: {}/{} ({:.0f}%)\n".format(

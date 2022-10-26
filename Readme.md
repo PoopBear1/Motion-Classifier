@@ -13,6 +13,8 @@ ${ROOT}
 |-- Data
 `-- |-- DAVIS
     `-- |-- Annotations
+    |    |   |-- {DOWN SCALE IMAGES} 
+    |    |   |
     |    |   |-- bus
     |    |   |   |-- 00000.jpg
     |    |   |   |-- 00001.jpg

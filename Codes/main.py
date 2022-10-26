@@ -18,7 +18,6 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))
 data_path = os.path.join(ROOT, "Data")
-# file = "tennis"
 image_path = os.path.join(data_path, "JPEGImages")
 label_path = os.path.join(data_path, "Annotations")
 output_path = os.path.join(ROOT, "Runs")
