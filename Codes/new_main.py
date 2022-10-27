@@ -1,13 +1,13 @@
 import os
-import sys
 from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
 from scipy.spatial import distance
 from sklearn.neighbors import LocalOutlierFactor
-
+import argparse
 from model import *
+import sys
 import copy
 
 FILE = Path(__file__).resolve()
@@ -19,9 +19,83 @@ data_path = os.path.join(ROOT, "Data")
 image_path = os.path.join(data_path, "JPEGImages")
 label_path = os.path.join(data_path, "Annotations")
 output_path = os.path.join(ROOT, "Runs")
-MODE = "NN"
-SCALE_Train = False
 ratio_x, ratio_y = 1919 / 853, 1079 / 479
+
+
+def random_sample(matrices, ground_truth_sift_label):
+
+    foreground_length = sum(ground_truth_sift_label)
+    total_length = len(ground_truth_sift_label)
+    background_length = total_length - foreground_length
+
+    foreground_index = np.where(ground_truth_sift_label == 1)
+    foreground_matrices = matrices[foreground_index]
+    foreground_label = ground_truth_sift_label[foreground_index]
+
+    background_index = np.where(ground_truth_sift_label == 0)
+    background_matrices = matrices[background_index]
+    background_label = ground_truth_sift_label[background_index]
+
+    if foreground_length < background_length:
+        background_index = np.random.choice(background_index[0], size=foreground_length, replace=False)
+        background_label = ground_truth_sift_label[background_index]
+        background_matrices = matrices[background_index]
+    else:
+        foreground_index = np.random.choice(foreground_index[0], size=background_length, replace=False)
+        foreground_label = ground_truth_sift_label[foreground_index]
+        foreground_matrices = matrices[foreground_index]
+
+    matrices = np.concatenate((foreground_matrices, background_matrices))
+    ground_truth_sift_label = np.concatenate((foreground_label, background_label))
+    # print(matrices.shape, ground_truth_sift_label.shape)
+    # exit(-1)
+
+    return matrices, ground_truth_sift_label
+
+
+def duplicate_data(matrices, ground_truth_sift_label):
+    """
+    Duplicate data for training, returns a randomized training data with evenly amount for foreground and background.
+    :param matrices:
+    :param ground_truth_sift_label:
+    :return: An evenly distributed training data
+    """
+
+    foreground_length = sum(ground_truth_sift_label)
+    total_length = len(ground_truth_sift_label)
+
+    background_length = total_length - foreground_length
+
+    if foreground_length < background_length:
+        indices = np.where(ground_truth_sift_label == 1)[0]
+        matrices_foreground = matrices[indices]
+
+        matrices_foreground = np.resize(
+            matrices_foreground,
+            (len(ground_truth_sift_label) - 2 * foreground_length, 3, 5),
+        )
+        labels = np.ones(len(ground_truth_sift_label) - 2 * sum(ground_truth_sift_label))
+
+        matrices = np.append(matrices, matrices_foreground, axis=0)
+        ground_truth_sift_label = np.append(ground_truth_sift_label, labels)
+
+        p = np.random.permutation(len(matrices))
+        return matrices[p], ground_truth_sift_label[p]
+
+    else:
+        indices = np.where(ground_truth_sift_label == 0)[0]
+        matrices_background = matrices[indices]
+
+        matrices_background = np.resize(
+            matrices_background,
+            (len(ground_truth_sift_label) - 2 * background_length, 3, 5),
+        )
+        labels = np.zeros(len(ground_truth_sift_label) - 2 * background_length)
+        matrices = np.append(matrices, matrices_background, axis=0)
+        ground_truth_sift_label = np.append(ground_truth_sift_label, labels)
+
+        p = np.random.permutation(len(matrices))
+        return matrices[p], ground_truth_sift_label[p]
 
 
 def rearrange_data(ground_truth_labels, matrices_on_each_frame):
@@ -37,14 +111,18 @@ def rearrange_data(ground_truth_labels, matrices_on_each_frame):
 
     temp_labels = copy.deepcopy(ground_truth_labels)
     #################### duplicated data #####################
+    # for frame_id in range(len(temp_labels)):
+    #     temp_matrices[frame_id], temp_labels[frame_id] = duplicate_data(
+    #         temp_matrices[frame_id], temp_labels[frame_id])
+    #################### Random Sample data #####################
     for frame_id in range(len(temp_labels)):
-        temp_matrices[frame_id], temp_labels[frame_id] = duplicate_data(
+        temp_matrices[frame_id], temp_labels[frame_id] = random_sample(
             temp_matrices[frame_id], temp_labels[frame_id])
 
     matrices_train = temp_matrices[0]
     labels_train = temp_labels[0]
 
-    for i in range(1, 4):
+    for i in range(1, 5):
         matrices_train = np.concatenate(
             (matrices_train, matrices_on_each_frame[i]), axis=0
         )
@@ -87,57 +165,6 @@ def get_model(matrices_on_each_frame, ground_truth_labels, path, scaled_matrices
     return model
 
 
-def duplicate_data(matrices, ground_truth_sift_label):
-    """
-    Duplicate data for training, returns a randomized training data with evenly amount for foreground and background.
-    :param matrices:
-    :param ground_truth_sift_label:
-    :return: An evenly distributed training data
-    """
-
-    foreground_length = sum(ground_truth_sift_label)
-    total_length = len(ground_truth_sift_label)
-
-    background_length = total_length - foreground_length
-    # print(foreground_length, total_length, background_length)
-
-    if foreground_length < background_length:
-        indices = np.where(ground_truth_sift_label == 1)[0]
-        matrices_foreground = matrices[indices]
-
-        # print(matrices.shape, matrices_foreground.shape)
-        # print(matrices)
-
-        matrices_foreground = np.resize(
-            matrices_foreground,
-            (len(ground_truth_sift_label) - 2 * foreground_length, 3, 5),
-        )
-        labels = np.ones(len(ground_truth_sift_label) - 2 * sum(ground_truth_sift_label))
-
-        matrices = np.append(matrices, matrices_foreground, axis=0)
-        ground_truth_sift_label = np.append(ground_truth_sift_label, labels)
-
-        # p = np.random.permutation(len(matrices))
-
-        # return matrices[p], ground_truth_sift_label[p]
-        return matrices, ground_truth_sift_label
-
-    else:
-        indices = np.where(ground_truth_sift_label == 0)[0]
-        matrices_background = matrices[indices]
-
-        matrices_background = np.resize(
-            matrices_background,
-            (len(ground_truth_sift_label) - 2 * background_length, 3, 5),
-        )
-        labels = np.zeros(len(ground_truth_sift_label) - 2 * background_length)
-        matrices = np.append(matrices, matrices_background, axis=0)
-        ground_truth_sift_label = np.append(ground_truth_sift_label, labels)
-
-        p = np.random.permutation(len(matrices))
-        return matrices[p], ground_truth_sift_label[p]
-
-
 def read_images(path, mode='gray'):
     alist = sorted(os.listdir(path))
     image_sequence = []
@@ -169,8 +196,6 @@ def save_data(ndarray, path, mode):
 
 
 def load_data(input_path):
-    # matrix_type = "Fundamental"
-    matrix_type = "Homography"
     refine_kp_path = os.path.join(input_path, "Refine_matches")
     matrices_path = os.path.join(input_path, "{}_Matrices_npy".format(matrix_type))
 
@@ -222,31 +247,6 @@ def load_data(input_path):
             )
             index += 1
         return feature_sequence, matrices_on_each_frame
-    ################################### Raw Keypoints version
-    # matrix_type = "Fundamental"
-    # matrices_path = os.path.join(input_path, "{}_Matrices_npy".format(matrix_type))
-    # kp_path = os.path.join(input_path, "KP_Matches")
-    #
-    # if not os.path.exists(input_path):
-    #     raise "Cannot find files"
-    #
-    # match_kps_list = sorted([os.path.join(kp_path, i) for i in os.listdir(kp_path)])
-    #
-    # index = 0
-    #
-    # matrices_on_each_frame = {}
-    # feature_sequence = []
-    # while index < len(match_kps_list):
-    #     current_kp = np.load(match_kps_list[index])["keypoints0"]
-    #     feature_sequence.append(current_kp)
-    #     matrices_on_each_frame[index] = np.load(
-    #         os.path.join(
-    #             matrices_path,
-    #             "{}_on_frame{:03d}.npy".format(matrix_type, index),
-    #         ),
-    #     )
-    #     index += 1
-    # return feature_sequence, matrices_on_each_frame
 
 
 def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
@@ -302,29 +302,6 @@ def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
                                                                                                    1] / ratio_y
 
             rescale_H, _ = cv2.findHomography(rescal_current_kp, rescal_next_kp, cv2.RANSAC, 5.0, confidence=0.9)
-
-            #################################################### Refine the H Matrix
-            # for i in range(current_partial_kp.shape[0]):
-            #     current_kp_cord = current_partial_kp[i]
-            #     next_kp_cord = next_partial_kp[i]
-            #     current_kp_cord = np.c_[current_kp_cord, 1]
-            #     next_kp_cord = np.c_[next_kp_cord, 1]
-            #
-            #     transfer_cord = (H @ current_kp_cord.T).T
-            #     if transfer_cord[:, 2] == 0:
-            #         return np.zeros(1)
-            #
-            #     transfer_cord = transfer_cord / transfer_cord[:, 2]
-
-            # if np.linalg.norm(transfer_cord - next_kp_cord) <= 1:
-            #     continue
-            # else:
-            #     print("not a valid F matrix")
-            #     return np.zeros(1)
-            # print(transfer_cord.shape)
-            # if transfer_cord[:, 0] < 0 or transfer_cord[:, 0] > 1920 or transfer_cord[:, 1] < 0 or transfer_cord[:,
-            #                                                                                        1] > 1080:
-            #     return np.zeros(1)
             if rescale_H is None:
                 return np.zeros(1), np.zeros(1)
 
@@ -332,7 +309,21 @@ def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
             next_cord = np.c_[rescal_next_kp[0].astype(int), frame_num + 1].reshape(3, -1)
             rescale_H = np.c_[rescale_H, current_cord, next_cord]
             return H, rescale_H
-        return H
+
+        else:
+            # Refine the H Matrix
+            for i in range(current_partial_kp.shape[0]):
+                current_kp_cord = current_partial_kp[i]
+                current_kp_cord = np.c_[current_kp_cord, 1]
+                transfer_cord = (H @ current_kp_cord.T).T
+                if transfer_cord[:, 2] == 0:
+                    return np.zeros(1)
+
+                transfer_cord = transfer_cord / transfer_cord[:, 2]
+                if transfer_cord[:, 0] < 0 or transfer_cord[:, 0] > 1920 or transfer_cord[:, 1] < 0 or transfer_cord[:,
+                                                                                                       1] > 1080:
+                    return np.zeros(1)
+            return H
 
 
 def Extract_labels(feature_sequence, ground_truth_frames):
@@ -435,7 +426,7 @@ def calculate_motion_matrices(current_compare, frame_num):
             keypoint = current_kp[i].reshape(-1, 2)
             # each kp compare all kps distance
             feature_distance = distance.cdist(keypoint, current_kp).squeeze()
-            num_of_neighbour = 8
+            num_of_neighbour = 6
 
             trans_matrix = find_nearest_keypoints(
                 feature_distance,
@@ -444,13 +435,13 @@ def calculate_motion_matrices(current_compare, frame_num):
                 next_kp,
                 frame_num
             )
-            for count in range(22):
+            for count in range(30):
                 if (trans_matrix == 0).all():
-                    if count == 21:
+                    if count == 29:
                         print("over thresholds")
                         trans_matrix = np.full((3, 5), np.inf)
                     else:
-                        num_of_neighbour += 1
+                        num_of_neighbour += 2
                         trans_matrix = find_nearest_keypoints(
                             feature_distance,
                             num_of_neighbour,
@@ -468,8 +459,6 @@ def calculate_motion_matrices(current_compare, frame_num):
 
 
 def Retrieve_all_transformation_matrix(match_kps_list):
-    matrix_type = "Homography"
-    # matrix_type = "Fundamental"
     refine_kps_path = os.path.join(output_path, "Refine_matches")
 
     if not os.path.isdir(os.path.join(output_path, "{}_Matrices_npy").format(matrix_type)):
@@ -684,6 +673,18 @@ def Show_predictions(current_kp, labels, frame_num, image, video):
 
 if __name__ == "__main__":
     videos = os.listdir(image_path)
+
+    parser = argparse.ArgumentParser(
+        description='Algorithm wrapper for Motion Matrices Extraction',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--scale_train', default=False, type=bool)
+    parser.add_argument('--generate_data', default=False, type=bool)
+    parser.add_argument('--reuse', default=False, type=bool)
+    parser.add_argument('--matrix_type', default="Homography", type=str)
+    args = parser.parse_args()
+    SCALE_Train = args.scale_train
+    matrix_type = args.matrix_type
+
     for video in videos:
         if video != ".DS_Store":
             print(video)
@@ -692,28 +693,28 @@ if __name__ == "__main__":
                 os.makedirs(output_path)
             # multiple scaling part here
             origin_images_path = os.path.join(image_path, video, "1080p")
-            scale_gt_path = os.path.join(label_path, video, "480p")
             origin_gt_path = os.path.join(label_path, video, "1080p")
             origin_gt = read_images(origin_gt_path)
-            scale_gt = read_images(scale_gt_path)
             origin_images = read_images(origin_images_path, "color")
 
-        # TODO: DO not Touch this part !!!
         # first time generating data:
         pair_txt_path = os.path.join(output_path, "image_pairs.txt")
         matches_path = os.path.join(output_path, "KP_Matches")
-        if not os.path.exists(pair_txt_path):
-            f = open(pair_txt_path, "w")
-            generate_compare_txt(origin_images_path, f, sorted(os.listdir(origin_images_path)))
-            f.close()
-            extract_feature(pair_txt_path, output_path=matches_path)
+        if args.generate_data:
+            if not os.path.exists(pair_txt_path):
+                f = open(pair_txt_path, "w")
+                generate_compare_txt(origin_images_path, f, sorted(os.listdir(origin_images_path)))
+                f.close()
+                extract_feature(pair_txt_path, output_path=matches_path)
 
-        match_kps_list = sorted([os.path.join(matches_path, file) for file in os.listdir(matches_path)])
-        # Retrieve_all_transformation_matrix(match_kps_list)
+            match_kps_list = sorted([os.path.join(matches_path, file) for file in os.listdir(matches_path)])
+            Retrieve_all_transformation_matrix(match_kps_list)
 
         # when we have generated data:
         # train model:
-        if SCALE_Train:
+        if args.scale_train:
+            scale_gt_path = os.path.join(label_path, video, "480p")
+            scale_gt = read_images(scale_gt_path)
             feature_sequence, matrices_on_each_frame, scaled_feature_sequence, scaled_matrices_on_each_frame = load_data(
                 output_path)
             ground_truth_labels = Extract_labels(feature_sequence, origin_gt)
@@ -724,14 +725,15 @@ if __name__ == "__main__":
             feature_sequence, matrices_on_each_frame = load_data(
                 output_path)
             ground_truth_labels = Extract_labels(feature_sequence, origin_gt)
+
+        if args.reuse:
+            model_path = os.path.join(ROOT, "Runs", video, "ckpt.pth")
+            if os.path.exists(model_path):
+                chkpt = torch.load(model_path, map_location=device)
+                model = MatClassificationNet().to(device)
+                model.load_state_dict(chkpt)
+        else:
             model = get_model(matrices_on_each_frame, ground_truth_labels, video)
 
-        # model_path = os.path.join(ROOT, "Runs", video, "ckpt.pth")
-        # if os.path.exists(model_path):
-        #     chkpt = torch.load(model_path, map_location=device)
-        #     model = MatClassificationNet().to(device)
-        #     model.load_state_dict(chkpt)
-        # else:
-
         ## Validate model
-        # NN_clustering(matrices_on_each_frame, feature_sequence, rgb_images, model)
+        NN_clustering(matrices_on_each_frame, feature_sequence, origin_images, model)

@@ -1,26 +1,20 @@
-import torch
-import torch.nn as nn
-import sys
-import torch.nn.functional as F
-import torchvision as torchvision
+from matplotlib import pyplot as plt
 from CBAM import *
-from helperfunction import *
-from torchvision import transforms
-from torchsummary import summary
+import os
 
 num_classes = 1
 
 # Hyper parameters
 config = {"lr": 1e-4,
           "num_epochs": 120,
-          "batch_size": 128,
+          "batch_size": 256,
           "regular_constant": 2e-5,
-          # "transforms_train": transforms.Compose(transforms.Normalize([0.5], [0.5]))
           }
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("model is training on {}".format(device))
+
 
 class MotionMatricesDataset(torch.utils.data.Dataset):
     def __init__(self, data_root, data_label, scaled_matrices=None, scaled_labels=None, transform=None,
@@ -38,12 +32,12 @@ class MotionMatricesDataset(torch.utils.data.Dataset):
             origin_label = torch.from_numpy(self.label)[index]
             scaled_data = torch.from_numpy(self.scaled_matrices)[index]
             scaled_label = torch.from_numpy(self.scaled_labels)[index]
-            return torch.unsqueeze(origin_data.float(), 0), origin_label, torch.unsqueeze(scaled_data.float(),
-                                                                                          0), scaled_label
+            return torch.unsqueeze(origin_data.float(), 0), origin_label.float(), torch.unsqueeze(scaled_data.float(),
+                                                                                                  0), scaled_label.float()
         else:
             data = torch.from_numpy(self.data)[index]
             labels = torch.from_numpy(self.label)[index]
-            return torch.unsqueeze(data.float(), 0), labels, torch.ones(1), torch.ones(1)
+            return torch.unsqueeze(data.float(), 0), labels.float(), torch.ones(1), torch.ones(1)
 
     def __len__(self):
         return len(self.data)
@@ -62,7 +56,7 @@ def To_dataset(matrices, labels, scaled_matrices=None, scaled_labels=None):
 def To_dataloader(dataset, size, validate=False):
     if validate:
         dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=12, shuffle=False
+            dataset, batch_size=12, shuffle=False, drop_last=True
         )
 
     else:
@@ -126,7 +120,7 @@ class MatClassificationNet(nn.Module):
             self.layer1 = nn.Sequential(
                 nn.utils.weight_norm(nn.Conv2d(1, 64, kernel_size=(3, 5))),
                 nn.BatchNorm2d(64),
-                nn.LeakyReLU()
+                nn.LeakyReLU(0.2)
             )
         # output after up1: N * 64 * 3 * 3 -> N * 32 * 6 * 6.
         self.up1 = Block(
@@ -146,7 +140,6 @@ class MatClassificationNet(nn.Module):
             act='relu',
             use_dropout=True
         )
-
 
         if self.flag_cbam:
             self.fc1 = nn.Sequential(
@@ -170,21 +163,22 @@ class MatClassificationNet(nn.Module):
             self.fc1 = nn.Sequential(
                 nn.Linear(64, 128),
                 nn.BatchNorm1d(128),
-                nn.LeakyReLU(0.2)
+                nn.LeakyReLU(0.2),
+                nn.Dropout(0.5),
             )
 
             self.fc2 = nn.Sequential(
                 nn.Linear(128, 256),
                 nn.BatchNorm1d(256),
                 nn.LeakyReLU(0.2),
-                nn.Dropout(0.3)
+                nn.Dropout(0.5)
             )
 
             self.fc3 = nn.Sequential(
                 nn.Linear(256, 512),
                 nn.BatchNorm1d(512),
                 nn.LeakyReLU(),
-                nn.Dropout(0.2)
+                nn.Dropout(0.5)
             )
 
             # self.fc4 = nn.Sequential(
@@ -193,7 +187,6 @@ class MatClassificationNet(nn.Module):
 
             self.fc4 = nn.Sequential(
                 nn.Linear(512, num_classes),
-                nn.Sigmoid()
             )
 
     def forward(self, x):
@@ -216,7 +209,7 @@ class MatClassificationNet(nn.Module):
             out = self.fc3(out)
 
         weights = out
-        out = self.fc4(out)
+        out = torch.sigmoid(self.fc4(out))
 
         return out, weights
 
@@ -268,7 +261,8 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
             else:
                 optimizer.zero_grad()
                 outputs, weight1 = model(inputs)
-                outputs = outputs.squeeze().type(torch.float64)
+                outputs = outputs.squeeze().type(torch.float32)
+                # print(targets.dtype,outputs.dtype)
                 loss1 = loss_function(outputs, targets)
                 loss = loss1
 
@@ -327,7 +321,8 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
                 else:
                     optimizer.zero_grad()
                     outputs, weight1 = model(inputs)
-                    outputs = outputs.squeeze().type(torch.float64)
+                    outputs = outputs.squeeze().type(torch.float32)
+                    # print(outputs, targets)
                     loss1 = loss_function(outputs, targets)
                     loss = loss1
 
