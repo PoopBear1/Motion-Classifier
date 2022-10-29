@@ -23,7 +23,6 @@ ratio_x, ratio_y = 1919 / 853, 1079 / 479
 
 
 def random_sample(matrices, ground_truth_sift_label):
-
     foreground_length = sum(ground_truth_sift_label)
     total_length = len(ground_truth_sift_label)
     background_length = total_length - foreground_length
@@ -255,24 +254,9 @@ def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
     if mode == "F":
         current_partial_kp = np.float32(current_partial_kp).reshape(-1, 1, 2)
         next_partial_kp = np.float32(next_partial_kp).reshape(-1, 1, 2)
-
         F, _ = cv2.findFundamentalMat(current_partial_kp, next_partial_kp, cv2.RANSAC, 5.0, confidence=0.95)
-
         if F is None:
             return np.zeros(1)
-        #################################################### Refine the F Matrix
-        # for i in range(current_partial_kp.shape[0]):
-        #     current_kp_cord = current_partial_kp[i]
-        #     next_kp_cord = next_partial_kp[i]
-        #     current_kp_cord = np.c_[current_kp_cord, 1]
-        #     next_kp_cord = np.c_[next_kp_cord, 1]
-        #     if np.abs(next_kp_cord @ F @ current_kp_cord.T - 0) < 1e-4:
-        #         continue
-        #     else:
-        #         # print("not a valid F matrix")
-        #         return np.zeros(1)
-        # extra = np.array([current_partial_kp[0], current_partial_kp[1], frame_num]).reshape(3, -1)
-        # F = np.c_[F, extra]
         return F
 
     else:
@@ -286,9 +270,6 @@ def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
                 return np.zeros(1), np.zeros(1)
             else:
                 return np.zeros(1)
-        current_cord = np.c_[current_partial_kp[0], frame_num].reshape(3, -1)
-        next_cord = np.c_[next_partial_kp[0], frame_num + 1].reshape(3, -1)
-        H = np.c_[H, current_cord, next_cord]
 
         if SCALE_Train:
             # store scaled points
@@ -323,6 +304,10 @@ def match_keypoints(current_partial_kp, next_partial_kp, frame_num):
                 if transfer_cord[:, 0] < 0 or transfer_cord[:, 0] > 1920 or transfer_cord[:, 1] < 0 or transfer_cord[:,
                                                                                                        1] > 1080:
                     return np.zeros(1)
+            current_cord = np.c_[current_partial_kp[0], frame_num].reshape(3, -1)
+            next_cord = np.c_[next_partial_kp[0], frame_num + 1].reshape(3, -1)
+            H = np.c_[H, current_cord, next_cord]
+
             return H
 
 
@@ -458,7 +443,7 @@ def calculate_motion_matrices(current_compare, frame_num):
         return matrices_on_each_frame
 
 
-def Retrieve_all_transformation_matrix(match_kps_list):
+def Retrieve_all_transformation_matrix(match_kps_list, output_path=output_path):
     refine_kps_path = os.path.join(output_path, "Refine_matches")
 
     if not os.path.isdir(os.path.join(output_path, "{}_Matrices_npy").format(matrix_type)):
@@ -671,6 +656,101 @@ def Show_predictions(current_kp, labels, frame_num, image, video):
     cv2.imwrite(os.path.join(foreground_path, "Foreground{:03d}.jpg".format(frame_num)), image)
 
 
+def create_small_train_data(gts, imgs):
+    tiny_data_path = os.path.join(output_path, "EXP_TEST")
+    fg_data_path = os.path.join(tiny_data_path, "fg")
+    bg_data_path = os.path.join(tiny_data_path, "bg")
+
+    have_preprocessed = True
+
+    if not have_preprocessed:
+
+        if not os.path.exists(tiny_data_path):
+            os.mkdir(tiny_data_path)
+            os.mkdir(fg_data_path)
+            os.mkdir(bg_data_path)
+
+        for index in range(len(gts)):
+            gt = gts[index]
+            img = imgs[index]
+            # fg iamges creating
+            save_fg_img = np.zeros_like(img)
+            fg_index = np.where(gt == 255)
+            save_fg_img[fg_index] = img[fg_index]
+            cv2.imwrite(os.path.join(fg_data_path, "fg_test_img{:03d}.jpg".format(index)), save_fg_img)
+
+            # bg iamges creating
+            save_bg_img = np.zeros_like(img)
+            bg_index = np.where(gt == 0)
+            save_bg_img[bg_index] = img[bg_index]
+            cv2.imwrite(os.path.join(bg_data_path, "bg_test_img{:03d}.jpg".format(index)), save_bg_img)
+
+        fg_list = sorted([file for file in os.listdir(fg_data_path)])
+        bg_list = sorted([file for file in os.listdir(bg_data_path)])
+
+        # fg parts
+        pair_txt_path = os.path.join(fg_data_path, "image_pairs.txt")
+        matches_path = os.path.join(fg_data_path, "KP_Matches")
+
+        if not os.path.exists(pair_txt_path):
+            f = open(pair_txt_path, "w")
+            generate_compare_txt(fg_data_path, f, fg_list)
+            f.close()
+        extract_feature(pair_txt_path, output_path=matches_path)
+        fg_matches_list = sorted([os.path.join(matches_path, file) for file in os.listdir(matches_path)])
+        Retrieve_all_transformation_matrix(fg_matches_list, output_path=fg_data_path)
+
+        # bg parts
+        pair_txt_path = os.path.join(bg_data_path, "image_pairs.txt")
+        matches_path = os.path.join(bg_data_path, "KP_Matches")
+
+        if not os.path.exists(pair_txt_path):
+            f = open(pair_txt_path, "w")
+            generate_compare_txt(bg_data_path, f, bg_list)
+            f.close()
+            extract_feature(pair_txt_path, output_path=matches_path)
+
+        extract_feature(pair_txt_path, output_path=matches_path)
+        bg_matches_list = sorted([os.path.join(matches_path, file) for file in os.listdir(matches_path)])
+        extract_feature(pair_txt_path, output_path=matches_path)
+        Retrieve_all_transformation_matrix(bg_matches_list, output_path=bg_data_path)
+
+    else:
+        fg_feature_sequence, fg_matrices_on_each_frame = load_data(fg_data_path)
+        bg_feature_sequence, bg_matrices_on_each_frame = load_data(bg_data_path)
+
+        matrices_list = []
+        labels_list = []
+        for frame in range(len(fg_matrices_on_each_frame)):
+            fg_frame_matrices = fg_matrices_on_each_frame[frame]
+            bg_frame_matrices = bg_matrices_on_each_frame[frame]
+            all_matrices = np.concatenate((fg_frame_matrices, bg_frame_matrices))
+            fg_labels = np.array([1] * fg_frame_matrices.shape[0])
+            bg_labels = np.array([0] * bg_frame_matrices.shape[0])
+            all_labels = np.concatenate((fg_labels, bg_labels))
+            sampled_matrices, sampled_labels = random_sample(all_matrices, all_labels)
+            # exit(sampled_matrices.shape)
+            matrices_list.append(sampled_matrices)
+            labels_list.append(sampled_labels)
+
+        train_matrices = matrices_list[0]
+        train_labels = labels_list[0]
+        for index in range(1, len(matrices_list)):
+            train_matrices = np.concatenate((train_matrices, matrices_list[index]))
+            train_labels = np.concatenate((train_labels, labels_list[index]))
+
+
+        full_dataset = To_dataset(train_matrices, train_labels)
+        train_size = int(0.9 * len(full_dataset))
+        validate_size = len(full_dataset) - train_size
+        train_dataset, validation_dataset = torch.utils.data.random_split(full_dataset, [train_size, validate_size])
+        training_dataloader = To_dataloader(train_dataset, size=train_size, validate=False)
+        validation_dataloader = To_dataloader(validation_dataset, size=validate_size, validate=True)
+        print("Ratio of training_set / Validate_set :", train_size, '/', validate_size)
+        # train_dataloader, validation_dataloader, validate_size = None
+        model = train(training_dataloader, validation_dataloader, validate_size, "bear", None, ROOT)
+
+
 if __name__ == "__main__":
     videos = os.listdir(image_path)
 
@@ -694,8 +774,13 @@ if __name__ == "__main__":
             # multiple scaling part here
             origin_images_path = os.path.join(image_path, video, "1080p")
             origin_gt_path = os.path.join(label_path, video, "1080p")
+            # print(origin_gt_path)
             origin_gt = read_images(origin_gt_path)
             origin_images = read_images(origin_images_path, "color")
+
+        create_small_train_data(origin_gt[:5], origin_images[:5])
+
+        exit(-1)
 
         # first time generating data:
         pair_txt_path = os.path.join(output_path, "image_pairs.txt")
