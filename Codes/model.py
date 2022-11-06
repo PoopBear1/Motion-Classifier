@@ -102,7 +102,7 @@ class Block(nn.Module):
 
 
 class MatClassificationNet(nn.Module):
-    def __init__(self, num_classes=1, flag_cbam=True):
+    def __init__(self, num_classes=1, flag_cbam=False):
         super(MatClassificationNet, self).__init__()
         # output after initial layer: N * 3 * 3 * 3 -> N * 64 * 3 * 3
         # input size: N*3*5
@@ -215,6 +215,7 @@ class MatClassificationNet(nn.Module):
 
 
 def train(train_dataloader, validation_dataloader, validation_size, video="", model=None, ROOT=os.getcwd()):
+    scaled_train = False
     if model is None:
         model = MatClassificationNet(num_classes).to(device)
     # loss_function = nn.CrossEntropyLoss()
@@ -245,7 +246,7 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
         model.train()
         for batch_idx, (inputs, targets, scaled_inputs, scaled_targets) in enumerate(train_dataloader):
             inputs, targets = inputs.to(device), targets.to(device)
-            if scaled_inputs.all() != 1:
+            if scaled_train:
                 scaled_inputs, scaled_targets = scaled_inputs.to(device), scaled_targets.to(device)
                 optimizer.zero_grad()
                 outputs, weight1 = model(inputs)
@@ -305,7 +306,7 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
         with torch.no_grad():
             for batch_idx, (inputs, targets, scaled_inputs, scaled_targets) in enumerate(validation_dataloader):
                 inputs, targets = inputs.to(device), targets.to(device)
-                if scaled_inputs.all() != 1:
+                if scaled_train:
                     scaled_inputs, scaled_targets = scaled_inputs.to(device), scaled_targets.to(device)
                     optimizer.zero_grad()
                     outputs, weight1 = model(inputs)
@@ -367,3 +368,12 @@ def train(train_dataloader, validation_dataloader, validation_size, video="", mo
     plt.savefig(os.path.join(ROOT, "Runs", video, "accuracy.jpg"))
     plt.close()
     return model
+
+if __name__ == '__main__':
+    from torchsummary import summary
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(torch.cuda.is_available())
+    # summary(MatClassificationNet().to(device), (1, 3, 5))
+
+    summary(MatClassificationNet().to(device), (1, 3, 5))
