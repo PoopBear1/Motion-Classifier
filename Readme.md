@@ -51,9 +51,9 @@ pip install -r requirements.txt
 ```
 
 ### Test our code
-*  you need to follow above Data Representation. Since we have discard using mult-scale image training, you may simply put testing video on "../Data/JPEGImages/${Video Name}/1080p" and then put corresponded labels in "../Data/Annotations/${Video Name}/1080p"
+*  you need to follow above Data Representation. Since we have discard using mult-scale image training, you may simply put testing video on ```"../Data/JPEGImages/${Video Name}/1080p" and then put corresponded labels in "../Data/Annotations/${Video Name}/1080p"```
 *  If you first time run our code(means you don't have any data,please make sure -generate_data is set on "True" and  -reuse is on "False")
-e.g.:
+e.g.
 ```shell
 python new_main.py --generate_data True --matrix_type Homography --reuse False
 ```
@@ -63,7 +63,7 @@ python new_main.py --generate_data False --matrix_type Homography --reuse True
 ```
 
 #### Brief Description
-This Project is designed to do separation of background and foreground via transformation matrices clustering. Specifically, transformation matrices are calculated from multi-frames SIFT features points. By analyzing and clustering on matrices, we can easily determine which part do feature points belong to. The SLIC algorithm is applied to draw a foreground that has at least one feature point.
+The project aims to achieve the separation of background and foreground by converting motion patterns to matrix classification. Specifically, the transformation matrix is calculated from the feature points between multiple frames. By analyzing the matrix, we can easily determine which motion pattern the feature points belong to. ~~The SLIC algorithm is applied to draw a foreground that has at least one feature point.~~ The foreground map is obtained by finding a confidence bounding box among a bunch of discrete points, and using the grab-cut method.
 
 This project has proven that our proposed method not only work on Static Cameras but also actually perform well in Moving Cameras.
     
