@@ -51,13 +51,13 @@ pip install -r requirements.txt
 ```
 
 ### Test our code
-you need to follow above Data Representation. Since we have discard using mult-scale image training, you may simply put testing video on "../Data/JPEGImages/${Video Name}/1080p" and then out its labels in "../Data/Annotations/${Video Name}/1080p"
-If you first time run our code(means you don't have any data,please make sure -generate_data is set on "True" and  -reuse is on "False")
+*  you need to follow above Data Representation. Since we have discard using mult-scale image training, you may simply put testing video on "../Data/JPEGImages/${Video Name}/1080p" and then put corresponded labels in "../Data/Annotations/${Video Name}/1080p"
+*  If you first time run our code(means you don't have any data,please make sure -generate_data is set on "True" and  -reuse is on "False")
 e.g.:
 ```shell
 python new_main.py --generate_data True --matrix_type Homography --reuse False
 ```
-otherwise you can use following commands 
+Otherwise, you can use following commands(reuse=True means you have pre-trained model) 
 ```shell
 python new_main.py --generate_data False --matrix_type Homography --reuse True
 ```
@@ -69,10 +69,11 @@ This project has proven that our proposed method not only work on Static Cameras
     
 
 
-### To Be fixed:
+### fixed:
 * Very slow on patch matching if we set feature points threshold super high.(an 80 frames video takes 3 hours to finish collecting all matrices, setting 2k feature points per frame)
   * fixed with importing dfm feature matching
-* On validation-set, Loss and Accuracy did not smoothly decrease/increase.
+*  Loss and Accuracy did not smoothly decrease/increase.
+  * fixed with minor bugs when appending loss
 * when data amount is small, validation amount might be not enough for efficient evaluation, which causes different result during different training. 
   * (Maybe try K-folder Validation latter)
   * fixed with importing dfm feature matching
