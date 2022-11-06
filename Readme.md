@@ -72,7 +72,7 @@ This project has proven that our proposed method not only work on Static Cameras
 ### fixed:
 * Very slow on patch matching if we set feature points threshold super high.(an 80 frames video takes 3 hours to finish collecting all matrices, setting 2k feature points per frame)
   * fixed with importing dfm feature matching
-*  Loss and Accuracy did not smoothly decrease/increase.
+* Loss and Accuracy did not smoothly decrease/increase.
   * fixed with minor bugs when appending loss
 * when data amount is small, validation amount might be not enough for efficient evaluation, which causes different result during different training. 
   * (Maybe try K-folder Validation latter)
